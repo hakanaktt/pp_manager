@@ -1,4 +1,4 @@
-# ICAD W11 Runner - Process Governor
+# Process Priority Manager
 
 A lightweight Rust-based Windows application with minimal GUI that continuously monitors and manages the `iced.exe` process, automatically setting its CPU affinity and priority.
 
