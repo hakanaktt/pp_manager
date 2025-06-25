@@ -1,0 +1,3 @@
+target_process = "icad.exe"
+core_selections = [true, true, true, true, true, true, true, true, true, true, true, true]
+priority_class = 128

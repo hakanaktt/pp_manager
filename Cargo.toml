@@ -1,0 +1,48 @@
+[package]
+name = "icad_w11_runner"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eframe = "0.24"
+egui = "0.24"
+winapi = { version = "0.3", features = [
+    "winuser",
+    "processthreadsapi",
+    "handleapi",
+    "tlhelp32",
+    "winnt",
+    "errhandlingapi",
+    "consoleapi",
+    "winbase",
+    "psapi",
+    "securitybaseapi",
+    "winerror",
+    "sysinfoapi",
+] }
+tokio = { version = "1.0", features = ["full"] }
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+tray-icon = "0.20.1"
+image = "0.25.6"
+toml = "0.8"
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = [
+    "winuser",
+    "processthreadsapi",
+    "handleapi",
+    "tlhelp32",
+    "winnt",
+    "errhandlingapi",
+    "consoleapi",
+    "winbase",
+    "psapi",
+    "securitybaseapi",
+    "winerror",
+    "sysinfoapi",
+] }
+
+[[bin]]
+name = "icad_w11_runner"
+path = "src/main.rs"
