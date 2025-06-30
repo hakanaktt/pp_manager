@@ -431,6 +431,29 @@ fn get_process_configs(state: tauri::State<AppState>) -> Vec<ProcessConfig> {
     config.processes.clone()
 }
 
+#[tauri::command]
+fn kill_process(pid: u32, state: tauri::State<AppState>) -> Result<(), String> {
+    let mut process_manager = state.process_manager.lock().unwrap();
+    process_manager.kill_process(pid)
+}
+
+#[tauri::command]
+fn get_process_details(pid: u32, state: tauri::State<AppState>) -> Result<serde_json::Value, String> {
+    let process_manager = state.process_manager.lock().unwrap();
+    match process_manager.get_process_details(pid) {
+        Ok(details) => Ok(serde_json::json!({
+            "pid": details.pid,
+            "name": details.name,
+            "current_priority": details.current_priority,
+            "current_affinity": details.current_affinity,
+            "last_applied_priority": details.last_applied_priority,
+            "last_applied_affinity": details.last_applied_affinity,
+            "is_tracked": details.is_tracked
+        })),
+        Err(err) => Err(err)
+    }
+}
+
 fn calculate_affinity_mask(core_selections: &[bool]) -> u64 {
     core_selections
         .iter()
@@ -485,7 +508,9 @@ fn main() {
             add_process_config,
             remove_process_config,
             update_process_config,
-            get_process_configs
+            get_process_configs,
+            kill_process,
+            get_process_details
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

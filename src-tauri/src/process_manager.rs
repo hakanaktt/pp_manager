@@ -3,12 +3,12 @@ use std::collections::HashMap;
 use winapi::shared::minwindef::{DWORD, FALSE};
 use winapi::shared::ntdef::NULL;
 use winapi::um::handleapi::{CloseHandle, INVALID_HANDLE_VALUE};
-use winapi::um::processthreadsapi::{OpenProcess, SetPriorityClass, GetPriorityClass};
+use winapi::um::processthreadsapi::{OpenProcess, SetPriorityClass, GetPriorityClass, TerminateProcess};
 use winapi::um::tlhelp32::{
     CreateToolhelp32Snapshot, Process32First, Process32Next, PROCESSENTRY32, TH32CS_SNAPPROCESS,
 };
 use winapi::um::winnt::{
-    PROCESS_QUERY_INFORMATION, PROCESS_SET_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION,
+    PROCESS_QUERY_INFORMATION, PROCESS_SET_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
 };
 use winapi::um::winbase::{SetProcessAffinityMask, GetProcessAffinityMask};
 use winapi::um::processthreadsapi::GetCurrentProcess;
@@ -42,6 +42,17 @@ pub struct ProcessInstance {
     pub pid: u32,
     pub last_applied_affinity: Option<u64>,
     pub last_applied_priority: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessDetails {
+    pub pid: u32,
+    pub name: String,
+    pub current_priority: Option<u32>,
+    pub current_affinity: Option<u64>,
+    pub last_applied_priority: Option<u32>,
+    pub last_applied_affinity: Option<u64>,
+    pub is_tracked: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -449,6 +460,122 @@ impl ProcessManager {
     /// Get all currently tracked process instances
     pub fn get_tracked_processes(&self) -> &HashMap<u32, ProcessInstance> {
         &self.tracked_processes
+    }
+
+    /// Kill a process by PID
+    pub fn kill_process(&mut self, pid: u32) -> Result<(), String> {
+        unsafe {
+            let process_handle = OpenProcess(
+                PROCESS_TERMINATE,
+                FALSE,
+                pid,
+            );
+
+            if process_handle == NULL {
+                let is_admin = Self::is_running_as_administrator();
+                if is_admin {
+                    return Err(format!("Failed to open process PID {} for termination. Process may have already exited or is protected.", pid));
+                } else {
+                    return Err(format!("Access denied to terminate PID {}. Run as Administrator to terminate processes.", pid));
+                }
+            }
+
+            let result = TerminateProcess(process_handle, 1);
+            CloseHandle(process_handle);
+
+            if result == 0 {
+                Err(format!("Failed to terminate process PID {}", pid))
+            } else {
+                // Remove from tracked processes since it's been terminated
+                self.tracked_processes.remove(&pid);
+                Ok(())
+            }
+        }
+    }
+
+    /// Get detailed process information by PID
+    pub fn get_process_details(&self, pid: u32) -> Result<ProcessDetails, String> {
+        unsafe {
+            let process_handle = OpenProcess(
+                PROCESS_QUERY_INFORMATION,
+                FALSE,
+                pid,
+            );
+
+            if process_handle == NULL {
+                // Try with limited permissions
+                let process_handle = OpenProcess(
+                    PROCESS_QUERY_LIMITED_INFORMATION,
+                    FALSE,
+                    pid,
+                );
+
+                if process_handle == NULL {
+                    return Err(format!("Failed to open process PID {} for information", pid));
+                }
+            }
+
+            // Get process name
+            let process_name = self.get_process_name_by_pid(pid).unwrap_or_else(|_| "Unknown".to_string());
+
+            // Get current priority
+            let current_priority = GetPriorityClass(process_handle);
+
+            // Get current affinity
+            let mut process_affinity: usize = 0;
+            let mut system_affinity: usize = 0;
+            let affinity_result = GetProcessAffinityMask(
+                process_handle,
+                &mut process_affinity,
+                &mut system_affinity,
+            );
+
+            CloseHandle(process_handle);
+
+            let tracked_info = self.tracked_processes.get(&pid);
+
+            Ok(ProcessDetails {
+                pid,
+                name: process_name,
+                current_priority: if current_priority != 0 { Some(current_priority) } else { None },
+                current_affinity: if affinity_result != 0 { Some(process_affinity as u64) } else { None },
+                last_applied_priority: tracked_info.and_then(|t| t.last_applied_priority),
+                last_applied_affinity: tracked_info.and_then(|t| t.last_applied_affinity),
+                is_tracked: tracked_info.is_some(),
+            })
+        }
+    }
+
+    /// Get process name by PID
+    fn get_process_name_by_pid(&self, target_pid: u32) -> Result<String, String> {
+        unsafe {
+            let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if snapshot == INVALID_HANDLE_VALUE {
+                return Err("Failed to create process snapshot".to_string());
+            }
+
+            let mut process_entry: PROCESSENTRY32 = mem::zeroed();
+            process_entry.dwSize = mem::size_of::<PROCESSENTRY32>() as DWORD;
+
+            if Process32First(snapshot, &mut process_entry) != 0 {
+                loop {
+                    if process_entry.th32ProcessID == target_pid {
+                        let name = std::ffi::CStr::from_ptr(process_entry.szExeFile.as_ptr())
+                            .to_string_lossy()
+                            .to_string();
+                        CloseHandle(snapshot);
+                        return Ok(name);
+                    }
+
+                    if Process32Next(snapshot, &mut process_entry) == 0 {
+                        break;
+                    }
+                }
+            }
+
+            CloseHandle(snapshot);
+            Err(format!("Process with PID {} not found", target_pid))
+        }
     }
 }
 

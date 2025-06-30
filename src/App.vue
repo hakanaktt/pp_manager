@@ -29,25 +29,55 @@
           <div
             v-for="process in trackedProcesses"
             :key="process.pid"
-            class="process-item"
+            class="process-item enhanced"
+            @mouseenter="loadProcessDetails(process.pid)"
           >
-            <div class="process-info">
-              <span class="process-pid">PID: {{ process.pid }}</span>
-              <span class="process-status">🟢 Active</span>
+            <div class="process-header">
+              <div class="process-info">
+                <div class="process-main-info">
+                  <span class="process-name">
+                    {{ processDetails.get(process.pid)?.name || 'Loading...' }}
+                  </span>
+                  <span class="process-pid">PID: {{ process.pid }}</span>
+                </div>
+                <span class="process-status">🟢 Active</span>
+              </div>
             </div>
-            <div class="process-details">
-              <span v-if="process.last_applied_affinity" class="process-detail">
-                Affinity: {{ formatHex(process.last_applied_affinity) }}
-              </span>
-              <span v-if="process.last_applied_priority" class="process-detail">
-                Priority: {{ formatHex(process.last_applied_priority) }}
-              </span>
+
+            <div class="process-details-grid">
+              <div class="detail-section">
+                <h4>Applied Settings</h4>
+                <div class="detail-items">
+                  <span v-if="process.last_applied_affinity" class="process-detail">
+                    <strong>Affinity:</strong> {{ formatHex(process.last_applied_affinity) }}
+                  </span>
+                  <span v-if="process.last_applied_priority" class="process-detail">
+                    <strong>Priority:</strong> {{ formatHex(process.last_applied_priority) }}
+                  </span>
+                  <span v-if="!process.last_applied_affinity && !process.last_applied_priority" class="process-detail no-settings">
+                    No settings applied yet
+                  </span>
+                </div>
+              </div>
+
+              <div v-if="processDetails.get(process.pid)" class="detail-section">
+                <h4>Current State</h4>
+                <div class="detail-items">
+                  <span v-if="processDetails.get(process.pid)?.current_affinity" class="process-detail">
+                    <strong>Affinity:</strong> {{ formatHex(processDetails.get(process.pid)!.current_affinity!) }}
+                  </span>
+                  <span v-if="processDetails.get(process.pid)?.current_priority" class="process-detail">
+                    <strong>Priority:</strong> {{ formatHex(processDetails.get(process.pid)!.current_priority!) }}
+                  </span>
+                </div>
+              </div>
             </div>
+
             <div class="process-actions">
               <button
                 class="btn-process-action"
                 @click="showProcessDetails(process)"
-                title="Show process details"
+                title="Show detailed process information"
               >
                 📊 Details
               </button>
@@ -58,6 +88,14 @@
                 :disabled="isMonitoring"
               >
                 ❌ Exclude
+              </button>
+              <button
+                class="btn-process-action btn-kill"
+                @click="killProcess(process.pid)"
+                title="Terminate this process (WARNING: This will forcefully close the process)"
+                :disabled="isMonitoring"
+              >
+                💀 Kill
               </button>
             </div>
           </div>
@@ -363,6 +401,16 @@ interface TrackedProcess {
   last_applied_priority: number | null
 }
 
+interface ProcessDetails {
+  pid: number
+  name: string
+  current_priority: number | null
+  current_affinity: number | null
+  last_applied_priority: number | null
+  last_applied_affinity: number | null
+  is_tracked: boolean
+}
+
 // Reactive state
 const systemInfo = ref<SystemInfo>({
   cpu_count: 0,
@@ -388,6 +436,8 @@ const autoScroll = ref(true)
 const logsContainer = ref<HTMLElement>()
 const trackedProcesses = ref<TrackedProcess[]>([])
 const excludedProcesses = ref<Set<number>>(new Set())
+const processDetails = ref<Map<number, ProcessDetails>>(new Map())
+const loadingProcessDetails = ref<Set<number>>(new Set())
 
 // Constants
 const priorityOptions: PriorityOption[] = [
@@ -511,20 +561,84 @@ const loadTrackedProcesses = async () => {
   try {
     const allProcesses = await invoke('get_tracked_processes') as TrackedProcess[]
     // Filter out excluded processes
-    trackedProcesses.value = allProcesses.filter(p => !excludedProcesses.value.has(p.pid))
+    const filteredProcesses = allProcesses.filter(p => !excludedProcesses.value.has(p.pid))
+    trackedProcesses.value = filteredProcesses
+
+    // Load details for new processes
+    for (const process of filteredProcesses) {
+      if (!processDetails.value.has(process.pid)) {
+        loadProcessDetails(process.pid)
+      }
+    }
+
+    // Clean up details for processes that are no longer tracked
+    const currentPids = new Set(filteredProcesses.map(p => p.pid))
+    for (const [pid] of processDetails.value) {
+      if (!currentPids.has(pid)) {
+        processDetails.value.delete(pid)
+      }
+    }
   } catch (error) {
     console.error('Failed to load tracked processes:', error)
   }
 }
 
-const showProcessDetails = (process: TrackedProcess) => {
-  const details = [
-    `Process ID: ${process.pid}`,
-    `Last Applied Affinity: ${process.last_applied_affinity ? formatHex(process.last_applied_affinity) : 'None'}`,
-    `Last Applied Priority: ${process.last_applied_priority ? formatHex(process.last_applied_priority) : 'None'}`
-  ].join('\n')
+const loadProcessDetails = async (pid: number) => {
+  if (loadingProcessDetails.value.has(pid)) return
 
-  alert(`Process Details:\n\n${details}`)
+  loadingProcessDetails.value.add(pid)
+  try {
+    const details = await invoke('get_process_details', { pid }) as ProcessDetails
+    processDetails.value.set(pid, details)
+  } catch (error) {
+    console.error(`Failed to load details for PID ${pid}:`, error)
+  } finally {
+    loadingProcessDetails.value.delete(pid)
+  }
+}
+
+const showProcessDetails = async (process: TrackedProcess) => {
+  await loadProcessDetails(process.pid)
+  const details = processDetails.value.get(process.pid)
+
+  if (details) {
+    const detailsText = [
+      `Process Name: ${details.name}`,
+      `Process ID: ${details.pid}`,
+      `Current Priority: ${details.current_priority ? formatHex(details.current_priority) : 'Unknown'}`,
+      `Current Affinity: ${details.current_affinity ? formatHex(details.current_affinity) : 'Unknown'}`,
+      `Last Applied Priority: ${details.last_applied_priority ? formatHex(details.last_applied_priority) : 'None'}`,
+      `Last Applied Affinity: ${details.last_applied_affinity ? formatHex(details.last_applied_affinity) : 'None'}`,
+      `Tracking Status: ${details.is_tracked ? 'Tracked' : 'Not Tracked'}`
+    ].join('\n')
+
+    alert(`Process Details:\n\n${detailsText}`)
+  } else {
+    const basicDetails = [
+      `Process ID: ${process.pid}`,
+      `Last Applied Affinity: ${process.last_applied_affinity ? formatHex(process.last_applied_affinity) : 'None'}`,
+      `Last Applied Priority: ${process.last_applied_priority ? formatHex(process.last_applied_priority) : 'None'}`
+    ].join('\n')
+
+    alert(`Process Details:\n\n${basicDetails}`)
+  }
+}
+
+const killProcess = async (pid: number) => {
+  const details = processDetails.value.get(pid)
+  const processName = details?.name || `PID ${pid}`
+
+  if (confirm(`Are you sure you want to terminate the process "${processName}"?\n\nThis action cannot be undone and may cause data loss if the process has unsaved work.`)) {
+    try {
+      await invoke('kill_process', { pid })
+      // Remove from tracked processes and details
+      trackedProcesses.value = trackedProcesses.value.filter(p => p.pid !== pid)
+      processDetails.value.delete(pid)
+      alert(`Process "${processName}" has been terminated successfully.`)
+    } catch (error) {
+      alert(`Failed to terminate process "${processName}": ${error}`)
+    }
+  }
 }
 
 const excludeProcess = (pid: number) => {
@@ -701,67 +815,118 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+/* Windows Aero Theme for Process Priority Manager */
 .app {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   max-width: 100%;
   margin: 0;
-  padding: 16px;
-  background: #f5f5f5;
+  padding: 20px;
   min-height: 100vh;
   box-sizing: border-box;
+  background: transparent;
 }
 
 .header {
   text-align: center;
-  margin-bottom: 20px;
+  margin-bottom: 24px;
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 12px;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 
 .header h1 {
   margin: 0;
-  color: #333;
-  font-size: 24px;
+  color: #2d3436;
+  font-size: 28px;
+  font-weight: 300;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
+  background: linear-gradient(135deg, #74b9ff 0%, #0984e3 50%, #6c5ce7 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .main {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 24px;
 }
 
-/* System Info */
+/* System Info - Windows Aero Style */
 .system-info {
-  background: white;
-  padding: 16px;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  background: rgba(255, 255, 255, 0.9);
+  padding: 20px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  transition: all 0.3s ease;
 }
 
-/* Tracked Processes */
+.system-info:hover {
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  transform: translateY(-2px);
+}
+
+/* Tracked Processes - Windows Aero Style */
 .tracked-processes {
-  background: white;
-  padding: 16px;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  background: rgba(255, 255, 255, 0.9);
+  padding: 20px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  transition: all 0.3s ease;
+}
+
+.tracked-processes:hover {
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  transform: translateY(-2px);
 }
 
 .tracked-processes h2 {
-  margin: 0 0 16px 0;
-  color: #333;
-  font-size: 18px;
+  margin: 0 0 20px 0;
+  color: #2d3436;
+  font-size: 20px;
+  font-weight: 300;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
 }
 
 .process-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: 16px;
+  margin-bottom: 16px;
 }
 
 .process-item {
-  background: #f9fafb;
-  padding: 12px;
-  border-radius: 6px;
-  border-left: 4px solid #22c55e;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-left: 4px solid #00b894;
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  transition: all 0.3s ease;
+}
+
+.process-item:hover {
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow:
+    0 6px 24px rgba(0, 0, 0, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  transform: translateY(-1px);
 }
 
 .process-info {
@@ -818,23 +983,42 @@ onMounted(async () => {
 }
 
 .btn-process-action {
-  padding: 4px 8px;
-  border: 1px solid #d1d5db;
+  padding: 6px 12px;
+  border: 1px solid #7fb3d3;
   border-radius: 4px;
-  background: white;
+  background: linear-gradient(180deg, #ffffff 0%, #e8f4fd 50%, #d0e8f7 100%);
   cursor: pointer;
-  font-size: 12px;
-  transition: background-color 0.2s;
+  font-size: 11px;
+  font-family: 'Segoe UI', sans-serif;
+  color: #2d3436;
+  transition: all 0.15s ease;
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
 .btn-process-action:hover:not(:disabled) {
-  background: #f3f4f6;
+  background: linear-gradient(180deg, #ffffff 0%, #f0f8ff 50%, #e0f0ff 100%);
+  border-color: #5a9fd4;
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.btn-process-action:active:not(:disabled) {
+  background: linear-gradient(180deg, #d0e8f7 0%, #b8ddf0 50%, #a0d2e9 100%);
+  border-color: #4a8bc2;
+  box-shadow:
+    inset 0 1px 3px rgba(0, 0, 0, 0.2),
+    0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .btn-process-action:disabled {
-  background: #f3f4f6;
-  color: #6b7280;
+  background: linear-gradient(180deg, #f5f5f5 0%, #e8e8e8 100%);
+  border-color: #c0c0c0;
+  color: #999;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 .btn-exclude {
@@ -844,6 +1028,84 @@ onMounted(async () => {
 
 .btn-exclude:hover:not(:disabled) {
   background: #fef2f2;
+}
+
+.btn-kill {
+  color: #dc2626;
+  border-color: #dc2626;
+  font-weight: 600;
+}
+
+.btn-kill:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #b91c1c;
+  color: #b91c1c;
+}
+
+/* Enhanced process item styles */
+.process-item.enhanced {
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.9);
+  border-left: 4px solid #3b82f6;
+}
+
+.process-header {
+  margin-bottom: 16px;
+}
+
+.process-main-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.process-name {
+  font-weight: 700;
+  color: #1f2937;
+  font-size: 16px;
+}
+
+.process-details-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 12px;
+  background: rgba(248, 250, 252, 0.8);
+  border-radius: 6px;
+  border: 1px solid rgba(226, 232, 240, 0.6);
+}
+
+.detail-section h4 {
+  margin: 0 0 8px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.detail-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.process-detail {
+  font-size: 13px;
+  color: #475569;
+  font-family: 'Courier New', monospace;
+}
+
+.process-detail strong {
+  color: #334155;
+  font-family: inherit;
+}
+
+.no-settings {
+  color: #94a3b8;
+  font-style: italic;
+  font-family: inherit;
 }
 
 .btn-clear-excluded {
@@ -896,22 +1158,45 @@ onMounted(async () => {
 
 
 
-/* Modern Process Management Section */
+/* Windows Aero Process Management Section */
 .processes-section {
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
   overflow: hidden;
-  margin-top: 16px;
+  margin-top: 20px;
+  transition: all 0.3s ease;
+}
+
+.processes-section:hover {
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  transform: translateY(-2px);
 }
 
 .section-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  padding: 24px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 28px;
+  background: linear-gradient(135deg, #74b9ff 0%, #0984e3 50%, #6c5ce7 100%);
   color: white;
+  position: relative;
+  overflow: hidden;
+}
+
+.section-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .header-content h2 {
@@ -929,25 +1214,43 @@ onMounted(async () => {
 .add-process-btn {
   display: flex;
   align-items: center;
-  gap: 8px;
-  background: rgba(255, 255, 255, 0.2);
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.25);
   color: white;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  padding: 10px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  padding: 12px 20px;
   border-radius: 8px;
   cursor: pointer;
   font-weight: 500;
-  transition: all 0.2s ease;
+  font-family: 'Segoe UI', sans-serif;
+  transition: all 0.3s ease;
+  position: relative;
+  z-index: 1;
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
 .add-process-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.35);
+  border-color: rgba(255, 255, 255, 0.5);
+  transform: translateY(-2px);
+  box-shadow:
+    0 6px 24px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.add-process-btn:active:not(:disabled) {
   transform: translateY(-1px);
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
 .add-process-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  transform: none;
 }
 
 .btn-icon {
@@ -955,26 +1258,51 @@ onMounted(async () => {
   font-weight: bold;
 }
 
-/* Add Process Modal */
+/* Windows Aero Modal */
 .add-process-modal {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
+  animation: modalFadeIn 0.3s ease;
+}
+
+@keyframes modalFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .modal-content {
-  background: white;
-  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 16px;
   width: 90%;
-  max-width: 500px;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+  max-width: 520px;
+  box-shadow:
+    0 24px 48px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  animation: modalSlideIn 0.3s ease;
+}
+
+@keyframes modalSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-20px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .modal-header {
@@ -1030,16 +1358,23 @@ onMounted(async () => {
 
 .modern-input {
   padding: 12px 16px;
-  border: 2px solid #e5e7eb;
-  border-radius: 8px;
+  border: 1px solid #7fb3d3;
+  border-radius: 6px;
   font-size: 14px;
-  transition: border-color 0.2s ease;
+  font-family: 'Segoe UI', sans-serif;
+  background: rgba(255, 255, 255, 0.95);
+  color: #2d3436;
+  transition: all 0.15s ease;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .modern-input:focus {
   outline: none;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  border-color: #4a8bc2;
+  background: rgba(255, 255, 255, 1);
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.1),
+    0 0 8px rgba(74, 139, 194, 0.3);
 }
 
 .input-hint {
@@ -1057,33 +1392,69 @@ onMounted(async () => {
 }
 
 .btn-primary {
-  background: #3b82f6;
+  background: linear-gradient(180deg, #74b9ff 0%, #0984e3 50%, #0066cc 100%);
   color: white;
   padding: 10px 20px;
-  border: none;
-  border-radius: 8px;
+  border: 1px solid #0066cc;
+  border-radius: 6px;
   cursor: pointer;
   font-weight: 500;
-  transition: background-color 0.2s ease;
+  font-family: 'Segoe UI', sans-serif;
+  transition: all 0.15s ease;
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
 .btn-primary:hover {
-  background: #2563eb;
+  background: linear-gradient(180deg, #81c7ff 0%, #1e90ff 50%, #0080ff 100%);
+  border-color: #0080ff;
+  box-shadow:
+    0 3px 8px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-primary:active {
+  background: linear-gradient(180deg, #5a9fd4 0%, #0066cc 50%, #004499 100%);
+  border-color: #004499;
+  box-shadow:
+    inset 0 1px 3px rgba(0, 0, 0, 0.3),
+    0 1px 2px rgba(0, 0, 0, 0.1);
+  transform: translateY(0);
 }
 
 .btn-secondary {
-  background: #f3f4f6;
-  color: #374151;
+  background: linear-gradient(180deg, #ffffff 0%, #f8f9fa 50%, #e9ecef 100%);
+  color: #495057;
   padding: 10px 20px;
-  border: none;
-  border-radius: 8px;
+  border: 1px solid #ced4da;
+  border-radius: 6px;
   cursor: pointer;
   font-weight: 500;
-  transition: background-color 0.2s ease;
+  font-family: 'Segoe UI', sans-serif;
+  transition: all 0.15s ease;
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
 .btn-secondary:hover {
-  background: #e5e7eb;
+  background: linear-gradient(180deg, #ffffff 0%, #f1f3f4 50%, #dee2e6 100%);
+  border-color: #adb5bd;
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  transform: translateY(-1px);
+}
+
+.btn-secondary:active {
+  background: linear-gradient(180deg, #e9ecef 0%, #dee2e6 50%, #ced4da 100%);
+  border-color: #adb5bd;
+  box-shadow:
+    inset 0 1px 3px rgba(0, 0, 0, 0.2),
+    0 1px 2px rgba(0, 0, 0, 0.1);
+  transform: translateY(0);
 }
 
 /* Process List Container */
@@ -1480,12 +1851,23 @@ onMounted(async () => {
   margin-top: 12px;
 }
 
-/* Controls */
+/* Windows Aero Controls */
 .controls {
-  background: white;
-  padding: 16px;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  background: rgba(255, 255, 255, 0.9);
+  padding: 20px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  transition: all 0.3s ease;
+}
+
+.controls:hover {
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  transform: translateY(-2px);
 }
 
 .control-buttons {
@@ -1496,37 +1878,74 @@ onMounted(async () => {
 }
 
 .btn {
-  padding: 10px 16px;
-  border: none;
-  border-radius: 4px;
+  padding: 12px 20px;
+  border: 1px solid;
+  border-radius: 6px;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
+  font-family: 'Segoe UI', sans-serif;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: all 0.15s ease;
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
 .btn-start {
-  background: #22c55e;
+  background: linear-gradient(180deg, #00b894 0%, #00a085 50%, #008f72 100%);
+  border-color: #008f72;
   color: white;
 }
 
 .btn-start:hover:not(:disabled) {
-  background: #16a34a;
+  background: linear-gradient(180deg, #00d2a4 0%, #00b894 50%, #00a085 100%);
+  border-color: #00a085;
+  box-shadow:
+    0 3px 8px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-start:active:not(:disabled) {
+  background: linear-gradient(180deg, #008f72 0%, #007d63 50%, #006b54 100%);
+  border-color: #006b54;
+  box-shadow:
+    inset 0 1px 3px rgba(0, 0, 0, 0.3),
+    0 1px 2px rgba(0, 0, 0, 0.1);
+  transform: translateY(0);
 }
 
 .btn-start:disabled {
-  background: #d1d5db;
-  color: #6b7280;
+  background: linear-gradient(180deg, #f5f5f5 0%, #e8e8e8 100%);
+  border-color: #c0c0c0;
+  color: #999;
   cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
 }
 
 .btn-stop {
-  background: #ef4444;
+  background: linear-gradient(180deg, #e17055 0%, #d63031 50%, #c0392b 100%);
+  border-color: #c0392b;
   color: white;
 }
 
 .btn-stop:hover {
-  background: #dc2626;
+  background: linear-gradient(180deg, #fd79a8 0%, #e84393 50%, #d63031 100%);
+  border-color: #d63031;
+  box-shadow:
+    0 3px 8px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-stop:active {
+  background: linear-gradient(180deg, #c0392b 0%, #a93226 50%, #922b21 100%);
+  border-color: #922b21;
+  box-shadow:
+    inset 0 1px 3px rgba(0, 0, 0, 0.3),
+    0 1px 2px rgba(0, 0, 0, 0.1);
+  transform: translateY(0);
 }
 
 .btn-secondary {
@@ -1572,60 +1991,109 @@ onMounted(async () => {
   color: #6b7280;
 }
 
-/* Tips */
+/* Windows Aero Tips */
 .tips {
-  background: #fef3c7;
-  padding: 12px;
-  border-radius: 4px;
+  background: rgba(255, 243, 199, 0.9);
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(245, 158, 11, 0.3);
   border-left: 4px solid #f59e0b;
+  box-shadow:
+    0 4px 16px rgba(245, 158, 11, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
 }
 
 .tip {
   color: #92400e;
   font-size: 14px;
+  font-family: 'Segoe UI', sans-serif;
 }
 
-/* Logs */
+/* Windows Aero Logs */
 .logs-section {
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
   overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.logs-section:hover {
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  transform: translateY(-2px);
 }
 
 .logs-section h2 {
   margin: 0;
-  padding: 16px 20px;
-  background: #f9fafb;
-  border-bottom: 1px solid #e5e7eb;
-  color: #333;
-  font-size: 16px;
+  padding: 20px 24px;
+  background: linear-gradient(135deg, rgba(116, 185, 255, 0.1) 0%, rgba(108, 92, 231, 0.1) 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+  color: #2d3436;
+  font-size: 18px;
+  font-weight: 300;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
 }
 
 .logs-container {
-  height: 200px;
+  height: 240px;
   overflow-y: auto;
-  padding: 12px;
+  padding: 16px 20px;
+  background: rgba(248, 249, 250, 0.5);
+}
+
+.logs-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+.logs-container::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+.logs-container::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #74b9ff 0%, #0984e3 100%);
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.logs-container::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #81c7ff 0%, #1e90ff 100%);
 }
 
 .no-logs {
   color: #6b7280;
   text-align: center;
-  padding: 20px;
+  padding: 32px 20px;
+  font-style: italic;
 }
 
 .logs {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .log-entry {
   display: flex;
-  gap: 8px;
-  font-size: 13px;
-  font-family: 'Courier New', monospace;
-  padding: 4px 0;
+  gap: 12px;
+  font-size: 12px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  padding: 6px 12px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  transition: all 0.2s ease;
+}
+
+.log-entry:hover {
+  background: rgba(255, 255, 255, 0.8);
+  border-color: rgba(255, 255, 255, 0.5);
+  transform: translateX(2px);
 }
 
 .log-level {
