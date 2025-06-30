@@ -1,0 +1,43 @@
+{
+  "$schema": "https://schema.tauri.app/config/2.0.0",
+  "productName": "Process Priority Manager",
+  "version": "0.1.0",
+  "identifier": "com.ppmanager.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Process Priority Manager",
+        "width": 400,
+        "height": 500,
+        "minWidth": 350,
+        "minHeight": 400,
+        "resizable": true,
+        "fullscreen": false,
+        "visible": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "shell": {
+      "all": false,
+      "open": true
+    }
+  }
+}
