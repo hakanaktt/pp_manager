@@ -175,3 +175,4 @@ The minimal GUI provides:
 ## License
 
 This project is provided as-is for educational and utility purposes.
+MIT License
