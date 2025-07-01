@@ -5,7 +5,7 @@ Developed to cope with Windows 11 24H2 power management system causing problems 
 
 ## Features
 
-- **Minimal GUI**: Clean, simple interface built with egui
+- **Minimal GUI**: Clean, simple interface built with Vue3
 - **Continuous Process Monitoring**: Watches for any configurable target process every 1 second
 - **Automatic Settings Reapplication**: Detects and corrects when Windows or applications reset affinity/priority
 - **Dynamic CPU Detection**: Automatically detects and supports all available CPU cores on your system
