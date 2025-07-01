@@ -1,6 +1,6 @@
 # Process Priority Manager
 
-A lightweight Rust-based Windows application with minimal GUI that continuously monitors and manages the `iced.exe` process, automatically setting its CPU affinity and priority.
+A lightweight Rust-based Windows application with minimal GUI that continuously monitors and manages the processes, automatically setting its CPU affinity and priority.
 
 ## Features
 
