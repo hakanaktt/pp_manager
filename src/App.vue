@@ -1,35 +1,41 @@
 <template>
   <div class="app">
-    <header class="header">
-      <h1>🎯 Process Priority Manager</h1>
-    </header>
+    <div class="win9x-window">
+      <div class="win9x-titlebar">
+        <div class="win9x-titlebar-text">🎯 Process Priority Manager</div>
+        <div class="win9x-titlebar-controls">
+          <button class="win9x-titlebar-button" @click="minimizeToTray" title="Minimize">_</button>
+          <button class="win9x-titlebar-button" title="Close">×</button>
+        </div>
+      </div>
 
-    <main class="main">
-      <!-- System Information -->
-      <section class="system-info">
-        <div class="info-item">
-          <span class="info-label">🖥️ System:</span>
-          <span class="info-value">{{ systemInfo.cpu_count }} CPU cores (Mask: {{ systemInfo.affinity_mask }})</span>
+      <div class="win9x-window-content">
+        <!-- System Information -->
+        <div class="win9x-groupbox">
+          <div class="win9x-groupbox-title">System Information</div>
+          <div class="info-item">
+            <span class="info-label">🖥️ System:</span>
+            <span class="info-value">{{ systemInfo.cpu_count }} CPU cores (Mask: {{ systemInfo.affinity_mask }})</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">🛡️ Admin Status:</span>
+            <span :class="['info-value', systemInfo.is_admin ? 'admin-yes' : 'admin-no']">
+              {{ systemInfo.is_admin ? 'Running as Administrator' : 'Not running as Administrator' }}
+            </span>
+            <span v-if="!systemInfo.is_admin" class="admin-warning">
+              (May have limited access to system processes)
+            </span>
+          </div>
         </div>
-        <div class="info-item">
-          <span class="info-label">🛡️ Admin Status:</span>
-          <span :class="['info-value', systemInfo.is_admin ? 'admin-yes' : 'admin-no']">
-            {{ systemInfo.is_admin ? 'Running as Administrator' : 'Not running as Administrator' }}
-          </span>
-          <span v-if="!systemInfo.is_admin" class="admin-warning">
-            (May have limited access to system processes)
-          </span>
-        </div>
-      </section>
 
       <!-- Tracked Processes Section -->
-      <section v-if="trackedProcesses.length > 0" class="tracked-processes">
-        <h2>🎯 Tracked Process Instances</h2>
+      <div v-if="trackedProcesses.length > 0" class="win9x-groupbox">
+        <div class="win9x-groupbox-title">🎯 Tracked Process Instances</div>
         <div class="process-list">
           <div
             v-for="process in trackedProcesses"
             :key="process.pid"
-            class="process-item enhanced"
+            class="win9x-panel process-item enhanced"
             @mouseenter="loadProcessDetails(process.pid)"
           >
             <div class="process-header">
@@ -75,14 +81,14 @@
 
             <div class="process-actions">
               <button
-                class="btn-process-action"
+                class="win9x-button"
                 @click="showProcessDetails(process)"
                 title="Show detailed process information"
               >
                 📊 Details
               </button>
               <button
-                class="btn-process-action btn-exclude"
+                class="win9x-button"
                 @click="excludeProcess(process.pid)"
                 title="Exclude this process from monitoring"
                 :disabled="isMonitoring"
@@ -90,7 +96,7 @@
                 ❌ Exclude
               </button>
               <button
-                class="btn-process-action btn-kill"
+                class="win9x-button"
                 @click="killProcess(process.pid)"
                 title="Terminate this process (WARNING: This will forcefully close the process)"
                 :disabled="isMonitoring"
@@ -108,29 +114,27 @@
           <button
             v-if="excludedProcesses.size > 0"
             @click="clearExcludedProcesses"
-            class="btn-clear-excluded"
+            class="win9x-button"
           >
             🔄 Show All
           </button>
         </div>
-      </section>
+      </div>
 
 
 
       <!-- Multi-Process Management Section -->
-      <section class="processes-section">
-        <div class="section-header">
-          <div class="header-content">
-            <h2>🎯 Process Management</h2>
-            <p class="section-subtitle">Configure multiple processes with individual CPU and priority settings</p>
-          </div>
+      <div class="win9x-groupbox">
+        <div class="win9x-groupbox-title">🎯 Process Management</div>
+        <div class="section-subtitle">Configure multiple processes with individual CPU and priority settings</div>
+        
+        <div style="margin: 8px 0;">
           <button
             @click="showAddProcess = true"
             :disabled="isMonitoring"
-            class="add-process-btn"
+            class="win9x-button"
           >
-            <span class="btn-icon">+</span>
-            Add Process
+            + Add Process
           </button>
         </div>
 
@@ -290,15 +294,16 @@
           <span class="notice-icon">ℹ️</span>
           Stop monitoring to modify process configurations
         </div>
-      </section>
+      </div>
 
       <!-- Control Buttons -->
-      <section class="controls">
-        <div class="control-buttons">
+      <div class="win9x-groupbox">
+        <div class="win9x-groupbox-title">Controls</div>
+        <div class="control-buttons" style="display: flex; gap: 8px; margin: 8px 0;">
           <button 
             v-if="isMonitoring"
             @click="stopMonitoring"
-            class="btn btn-stop"
+            class="win9x-button"
           >
             ⏹ Stop Monitoring
           </button>
@@ -306,7 +311,7 @@
             v-else
             :disabled="!canStartMonitoring"
             @click="startMonitoring"
-            class="btn btn-start"
+            class="win9x-button-default"
           >
             ▶ Start Monitoring
           </button>
@@ -316,28 +321,31 @@
           </span>
         </div>
 
-        <div class="secondary-controls">
-          <button @click="clearLogs" class="btn btn-secondary">🗑 Clear Logs</button>
-          <button @click="minimizeToTray" class="btn btn-secondary">📱 Minimize to Tray</button>
-          <label class="checkbox-label">
-            <input v-model="autoScroll" type="checkbox" />
+        <div class="secondary-controls" style="display: flex; gap: 8px; margin: 8px 0;">
+          <button @click="clearLogs" class="win9x-button">🗑 Clear Logs</button>
+          <button @click="minimizeToTray" class="win9x-button">📱 Minimize to Tray</button>
+          <label style="display: flex; align-items: center; gap: 4px;">
+            <input v-model="autoScroll" type="checkbox" class="win9x-checkbox" />
             Auto-scroll logs
           </label>
-          <span class="log-count">📊 {{ logs.length }} log entries</span>
+          <span style="color: #606060; font-size: 10px;">📊 {{ logs.length }} log entries</span>
         </div>
-      </section>
+      </div>
+        </div>
+      </div>
 
       <!-- Tips -->
-      <section class="tips">
+      <div class="win9x-groupbox">
+        <div class="win9x-groupbox-title">💡 Tips</div>
         <div class="tip">
-          💡 Tip: Use Ctrl+Shift+P to show/hide this window, or use the system tray icon.
+          Use Ctrl+Shift+P to show/hide this window, or use the system tray icon.
         </div>
-      </section>
+      </div>
 
       <!-- Logs Section -->
-      <section class="logs-section">
-        <h2>📋 Activity Logs</h2>
-        <div class="logs-container" ref="logsContainer">
+      <div class="win9x-groupbox">
+        <div class="win9x-groupbox-title">📋 Activity Logs</div>
+        <div class="win9x-listbox logs-container" ref="logsContainer">
           <div v-if="logs.length === 0" class="no-logs">
             No logs yet. Start monitoring to see activity.
           </div>
@@ -353,8 +361,8 @@
             </div>
           </div>
         </div>
-      </section>
-    </main>
+      </div>
+    </div>
   </div>
 </template>
 
