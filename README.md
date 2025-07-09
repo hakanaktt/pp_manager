@@ -1,10 +1,11 @@
 # Process Priority Manager
 
-A lightweight Rust-based Windows application with minimal GUI that continuously monitors and manages the `iced.exe` process, automatically setting its CPU affinity and priority.
+A lightweight Rust-based Windows application with minimal GUI that continuously monitors and manages the processes, automatically setting its CPU affinity and priority.
+Developed to cope with Windows 11 24H2 power management system causing problems with certain apps.
 
 ## Features
 
-- **Minimal GUI**: Clean, simple interface built with egui
+- **Minimal GUI**: Clean, simple interface built with Vue3
 - **Continuous Process Monitoring**: Watches for any configurable target process every 1 second
 - **Automatic Settings Reapplication**: Detects and corrects when Windows or applications reset affinity/priority
 - **Dynamic CPU Detection**: Automatically detects and supports all available CPU cores on your system
@@ -35,7 +36,7 @@ cargo run --release
 
 Or run the compiled executable:
 ```bash
-./target/release/icad_w11_runner.exe
+./target/release/pp_manager.exe
 ```
 
 ## Usage
@@ -119,11 +120,11 @@ The application uses direct Windows API calls:
 ## Behavior
 
 ```
-[INFO] 14:30:15 iced.exe not running.
-[SUCCESS] 14:30:45 iced.exe found (PID: 5824). Initial settings applied.
-[REAPPLY] 14:30:52 iced.exe (PID: 5824) settings reapplied: CPU affinity: 0xFF → 0x30
-[INFO] 14:32:10 iced.exe not running.
-[SUCCESS] 14:33:22 iced.exe found (PID: 6120). Initial settings applied.
+[INFO] 14:30:15 xxx.exe not running.
+[SUCCESS] 14:30:45 xxx.exe found (PID: 5824). Initial settings applied.
+[REAPPLY] 14:30:52 xxx.exe (PID: 5824) settings reapplied: CPU affinity: 0xFF → 0x30
+[INFO] 14:32:10 xxx.exe not running.
+[SUCCESS] 14:33:22 xxx.exe found (PID: 6120). Initial settings applied.
 ```
 
 ### Enhanced Monitoring Behavior
@@ -158,9 +159,9 @@ For testing purposes, a test setup is provided:
    ```
 
 3. **Test the application**:
-   - Start the ICAD W11 Runner GUI
+   - Start the app
    - Click "▶ Start Monitoring"
-   - Run `iced.exe` in another terminal
+   - Run your app
    - Observe the logs in the GUI showing process detection and settings application
 
 ## Screenshots
@@ -174,3 +175,4 @@ The minimal GUI provides:
 ## License
 
 This project is provided as-is for educational and utility purposes.
+MIT License
